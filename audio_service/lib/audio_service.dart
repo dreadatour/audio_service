@@ -902,6 +902,17 @@ class AudioService {
 
   static final _compatibilitySwitcher = SwitchAudioHandler();
 
+  /// Dirty hack to catch the 'ForegroundServiceStartNotAllowedException'
+  /// and process it in the app.
+  // ignore: close_sinks
+  static final BehaviorSubject<bool> foregroundServiceStartNotAllowed =
+      BehaviorSubject.seeded(false);
+
+  /// A stream that broadcasts the status of the
+  /// foregroundServiceStartNotAllowed errors.
+  static ValueStream<bool> get foregroundServiceStartNotAllowedStream =>
+      foregroundServiceStartNotAllowed;
+
   /// Register the app's [AudioHandler] with configuration options. This must be
   /// called once during the app's initialisation so that it is prepared to
   /// handle audio requests immediately after a cold restart (e.g. if the user
@@ -1027,8 +1038,16 @@ class AudioService {
   static Future<void> _observePlaybackState() async {
     var previousState = _handler.playbackState.nvalue;
     await for (var playbackState in _handler.playbackState) {
-      await _platform
-          .setState(SetStateRequest(state: playbackState._toMessage()));
+      try {
+        await _platform
+            .setState(SetStateRequest(state: playbackState._toMessage()));
+      } catch (err) {
+        if (err.toString().contains('mAllowStartForeground false')) {
+          foregroundServiceStartNotAllowed.add(true);
+        } else {
+          rethrow;
+        }
+      }
       if (playbackState.processingState == AudioProcessingState.idle &&
           previousState?.processingState != AudioProcessingState.idle) {
         await AudioService._stop();
